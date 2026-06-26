@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       where: { id },
       include: {
         verificationRecords: true,
-        auditLogs: true,
+        complianceAuditLogs: true,
       },
     });
 
