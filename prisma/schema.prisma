@@ -1,0 +1,867 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & AUTHORIZATION
+// ============================================================================
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  APPLICANT
+  CUSTOMER
+  STAFF
+}
+
+enum EmploymentType {
+  FREELANCE
+  PERMANENT
+  CONTRACT
+}
+
+model User {
+  id                    String    @id @default(cuid())
+  email                 String    @unique @db.VarChar(255)
+  password              String    @db.VarChar(500)
+  firstName             String    @db.VarChar(100)
+  lastName              String    @db.VarChar(100)
+  phone                 String?   @db.VarChar(20)
+  profileImage          String?   @db.VarChar(1000)
+  role                  UserRole  @default(APPLICANT)
+  emailVerified         Boolean   @default(false)
+  emailVerificationToken String?  @db.VarChar(500)
+  emailVerificationTokenExpiry DateTime?
+  passwordResetToken    String?   @db.VarChar(500)
+  passwordResetTokenExpiry DateTime?
+  isActive              Boolean   @default(true)
+  lastLogin             DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  // Relations
+  employee              Employee?
+  jobApplications       JobApplication[]
+  interviews            Interview[]
+  shifts                Shift[]
+  attendanceRecords     AttendanceRecord[]
+  supportTickets        SupportTicket[]
+  notifications         Notification[]
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String
+  token         String    @unique @db.VarChar(1000)
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  ipAddress     String?   @db.VarChar(50)
+  userAgent     String?   @db.Text
+
+  @@index([userId])
+}
+
+// ============================================================================
+// BUSINESS COMPLIANCE & VERIFICATION
+// ============================================================================
+
+enum CertificateStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  REVOKED
+}
+
+enum CertificateType {
+  CAC_REGISTRATION
+  FCT_BUSINESS_PERMIT
+  ENVIRONMENTAL_HEALTH
+  TAX_IDENTIFICATION
+  ABUJA_MUNICIPAL_LICENSE
+  VEHICLE_ROADWORTHINESS
+}
+
+model ComplianceCertificate {
+  id                    String            @id @default(cuid())
+  type                  CertificateType
+  certificateNumber     String            @unique @db.VarChar(255)
+  issuedDate            DateTime
+  expiryDate            DateTime
+  issuerName            String            @db.VarChar(255)
+  certificateDocument   String            @db.VarChar(1000) // URL to document
+  qrVerificationCode    String            @unique @db.VarChar(500)
+  verificationUrl       String            @unique @db.VarChar(1000)
+  status                CertificateStatus @default(PENDING)
+  verifiedAt            DateTime?
+  verifiedBy            String?           @db.VarChar(255)
+  expiryReminderSent    Boolean           @default(false)
+  lastReminderSentAt    DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // Relations
+  verificationRecords   VerificationRecord[]
+  complianceAuditLogs   ComplianceAuditLog[]
+}
+
+model VerificationRecord {
+  id                    String    @id @default(cuid())
+  certificateId         String
+  certificate           ComplianceCertificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  verificationToken     String    @unique @db.VarChar(500)
+  verifiedAt            DateTime  @default(now())
+  verifierIp            String?   @db.VarChar(50)
+  verifierLocation      String?   @db.VarChar(255)
+  isValid               Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+
+  @@index([certificateId])
+}
+
+model ComplianceAuditLog {
+  id                    String    @id @default(cuid())
+  action                String    @db.VarChar(255)
+  certificateId         String?
+  certificate           ComplianceCertificate? @relation(fields: [certificateId], references: [id], onDelete: SetNull)
+  performedBy           String    @db.VarChar(255)
+  details               String?   @db.Text
+  ipAddress             String?   @db.VarChar(50)
+  createdAt             DateTime  @default(now())
+
+  @@index([certificateId])
+}
+
+// ============================================================================
+// RECRUITMENT & EMPLOYMENT
+// ============================================================================
+
+enum JobStatus {
+  OPEN
+  CLOSED
+  FILLED
+  ARCHIVED
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  AI_SCREENING
+  SHORTLISTED
+  INTERVIEW_SCHEDULED
+  INTERVIEW_COMPLETED
+  OFFER_MADE
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+model Job {
+  id                    String          @id @default(cuid())
+  title                 String          @db.VarChar(255)
+  description           String          @db.Text
+  employmentType        EmploymentType
+  locations             String          @db.VarChar(1000) // JSON array of location codes
+  salary                Decimal         @db.Decimal(10, 2)
+  salaryMin             Decimal?        @db.Decimal(10, 2)
+  salaryMax             Decimal?        @db.Decimal(10, 2)
+  currency              String          @default("NGN") @db.VarChar(3)
+  requirements          String          @db.Text // JSON array
+  responsibilities      String          @db.Text // JSON array
+  status                JobStatus       @default(OPEN)
+  positionsOpen         Int             @default(1)
+  positionsFilled       Int             @default(0)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  closingDate           DateTime?
+
+  // Relations
+  applications          JobApplication[]
+  employees             Employee[]
+}
+
+model JobApplication {
+  id                    String            @id @default(cuid())
+  jobId                 String
+  job                   Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredLocations    String            @db.VarChar(1000) // JSON array
+  cv                    String            @db.VarChar(1000) // URL
+  coverLetter           String?           @db.Text
+  status                ApplicationStatus @default(SUBMITTED)
+  aiScore               Decimal?          @db.Decimal(5, 2) // AI screening score
+  aiRecommendation      String?           @db.Text
+  notes                 String?           @db.Text
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // Relations
+  interviews            Interview[]
+
+  @@index([jobId])
+  @@index([userId])
+}
+
+model Interview {
+  id                    String            @id @default(cuid())
+  applicationId         String
+  application           JobApplication    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  scheduledBy           String
+  scheduledByUser       User              @relation(fields: [scheduledBy], references: [id])
+  scheduledAt           DateTime
+  interviewType         String            @default("VIDEO") @db.VarChar(50)
+  meetingUrl            String?           @db.VarChar(1000)
+  status                InterviewStatus   @default(SCHEDULED)
+  notes                 String?           @db.Text
+  rating                Decimal?          @db.Decimal(5, 2)
+  feedback              String?           @db.Text
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([applicationId])
+  @@index([scheduledBy])
+}
+
+model Contract {
+  id                    String            @id @default(cuid())
+  employeeId            String
+  employee              Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  contractType          String            @db.VarChar(100)
+  startDate             DateTime
+  endDate               DateTime?
+  salary                Decimal           @db.Decimal(10, 2)
+  currency              String            @default("NGN") @db.VarChar(3)
+  terms                 String            @db.Text // JSON
+  signedAt              DateTime?
+  signedByEmployee      Boolean           @default(false)
+  signedByEmployer      Boolean           @default(false)
+  documentUrl           String?           @db.VarChar(1000)
+  isActive              Boolean           @default(true)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([employeeId])
+}
+
+model Employee {
+  id                    String            @id @default(cuid())
+  userId                String            @unique
+  user                  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId                 String?
+  job                   Job?              @relation(fields: [jobId], references: [id])
+  employmentType        EmploymentType
+  hireDate              DateTime
+  nin                   String?           @unique @db.VarChar(20) // National Identification Number
+  bvn                   String?           @unique @db.VarChar(20) // Bank Verification Number
+  bankName              String?           @db.VarChar(100)
+  bankAccount           String?           @db.VarChar(20)
+  emergencyContact      String?           @db.VarChar(100)
+  emergencyPhone        String?           @db.VarChar(20)
+  address               String?           @db.Text
+  preferredLocations    String            @db.VarChar(1000) // JSON array
+  gpsVerified           Boolean           @default(false)
+  gpsVerificationTime   DateTime?
+  performanceRating     Decimal?          @db.Decimal(5, 2)
+  totalCompletedShifts  Int               @default(0)
+  totalHours            Decimal           @default(0) @db.Decimal(10, 2)
+  strikeCount           Int               @default(0)
+  lastStrikeDate        DateTime?
+  isActive              Boolean           @default(true)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // Relations
+  contracts             Contract[]
+  shifts                Shift[]
+  attendanceRecords     AttendanceRecord[]
+  clientRatings         ClientRating[]
+  performanceReviews    PerformanceReview[]
+  trainingProgress      TrainingProgress[]
+  trainingCertificates  TrainingCertificate[]
+
+  @@index([userId])
+  @@index([jobId])
+}
+
+// ============================================================================
+// OPERATIONS & SERVICES
+// ============================================================================
+
+enum ServiceType {
+  DEEP_CLEANING
+  MOVE_IN_OUT
+  COMMERCIAL_CLEANING
+  RESIDENTIAL_CLEANING
+  LOGISTICS_PACKING
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ShiftStatus {
+  PENDING
+  ASSIGNED
+  STARTED
+  COMPLETED
+  CANCELLED
+}
+
+model Service {
+  id                    String          @id @default(cuid())
+  name                  String          @db.VarChar(255)
+  type                  ServiceType
+  description           String          @db.Text
+  basePrice             Decimal         @db.Decimal(10, 2)
+  currency              String          @default("NGN") @db.VarChar(3)
+  estimatedDuration     Int             // in minutes
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  bookings              Booking[]
+  locations             ServiceArea[]
+}
+
+model ServiceArea {
+  id                    String          @id @default(cuid())
+  serviceId             String
+  service               Service         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  areaCode              String          @db.VarChar(50)
+  areaName              String          @db.VarChar(100)
+  deliveryDays          Int             @default(1) // days for service delivery
+  priceMultiplier       Decimal         @default(1) @db.Decimal(5, 2) // for area-specific pricing
+  isAvailable           Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+
+  @@unique([serviceId, areaCode])
+  @@index([serviceId])
+}
+
+model Booking {
+  id                    String          @id @default(cuid())
+  bookingNumber         String          @unique @db.VarChar(50)
+  serviceId             String
+  service               Service         @relation(fields: [serviceId], references: [id])
+  customerId            String          @db.VarChar(255) // Can be user or external
+  customerName          String          @db.VarChar(255)
+  customerPhone         String          @db.VarChar(20)
+  customerEmail         String?         @db.VarChar(255)
+  serviceDate           DateTime
+  address               String          @db.Text
+  areaCode              String          @db.VarChar(50)
+  latitude              Decimal?        @db.Decimal(10, 8)
+  longitude             Decimal?        @db.Decimal(11, 8)
+  notes                 String?         @db.Text
+  estimatedPrice        Decimal         @db.Decimal(10, 2)
+  finalPrice            Decimal?        @db.Decimal(10, 2)
+  status                BookingStatus   @default(PENDING)
+  aiQuote               String?         @db.Text // AI-generated quote details
+  confirmedAt           DateTime?
+  completedAt           DateTime?
+  paymentStatus         String          @default("PENDING") @db.VarChar(50)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  shifts                Shift[]
+  payments              Payment[]
+  clientRatings         ClientRating[]
+  invoice               Invoice?
+
+  @@index([serviceId])
+  @@index([serviceDate])
+}
+
+model Shift {
+  id                    String          @id @default(cuid())
+  bookingId             String
+  booking               Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id])
+  assignedBy            String
+  assignedByUser        User            @relation(fields: [assignedBy], references: [id])
+  shiftDate             DateTime
+  startTime             DateTime
+  endTime               DateTime
+  status                ShiftStatus     @default(PENDING)
+  checkInTime           DateTime?
+  checkOutTime          DateTime?
+  checkInPhoto          String?         @db.VarChar(1000) // URL
+  checkOutPhoto         String?         @db.VarChar(1000) // URL
+  gpsCheckIn            Boolean         @default(false)
+  gpsCheckInLat         Decimal?        @db.Decimal(10, 8)
+  gpsCheckInLon         Decimal?        @db.Decimal(11, 8)
+  hoursWorked           Decimal?        @db.Decimal(5, 2)
+  notes                 String?         @db.Text
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  attendanceRecords     AttendanceRecord[]
+
+  @@index([bookingId])
+  @@index([employeeId])
+  @@index([shiftDate])
+}
+
+model AttendanceRecord {
+  id                    String          @id @default(cuid())
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shiftId               String?
+  shift                 Shift?          @relation(fields: [shiftId], references: [id])
+  userId                String
+  user                  User            @relation(fields: [userId], references: [id])
+  date                  DateTime
+  status                String          @db.VarChar(50) // PRESENT, ABSENT, LATE, EARLY_LEAVE
+  checkInTime           DateTime?
+  checkOutTime          DateTime?
+  latitude              Decimal?        @db.Decimal(10, 8)
+  longitude             Decimal?        @db.Decimal(11, 8)
+  notes                 String?         @db.Text
+  createdAt             DateTime        @default(now())
+
+  @@index([employeeId])
+  @@index([userId])
+  @@index([date])
+}
+
+model ClientRating {
+  id                    String          @id @default(cuid())
+  bookingId             String
+  booking               Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id])
+  rating                Int             // 1-5
+  review                String?         @db.Text
+  wouldRecommend        Boolean?
+  createdAt             DateTime        @default(now())
+
+  @@index([bookingId])
+  @@index([employeeId])
+}
+
+// ============================================================================
+// TRAINING & DEVELOPMENT
+// ============================================================================
+
+enum TrainingStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+model Training {
+  id                    String          @id @default(cuid())
+  title                 String          @db.VarChar(255)
+  description           String          @db.Text
+  type                  String          @db.VarChar(50) // SOP_VIDEO, INTERACTIVE, QUIZ, CERTIFICATION
+  status                TrainingStatus  @default(ACTIVE)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  modules               TrainingModule[]
+  progress              TrainingProgress[]
+}
+
+model TrainingModule {
+  id                    String          @id @default(cuid())
+  trainingId            String
+  training              Training        @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  title                 String          @db.VarChar(255)
+  description           String?         @db.Text
+  content               String          @db.Text // Markdown or HTML
+  videoUrl              String?         @db.VarChar(1000)
+  order                 Int
+  createdAt             DateTime        @default(now())
+
+  @@index([trainingId])
+}
+
+model TrainingProgress {
+  id                    String          @id @default(cuid())
+  trainingId            String
+  training              Training        @relation(fields: [trainingId], references: [id], onDelete: Cascade)
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  status                ProgressStatus  @default(NOT_STARTED)
+  startedAt             DateTime?
+  completedAt           DateTime?
+  score                 Decimal?        @db.Decimal(5, 2)
+  certificateUrl        String?         @db.VarChar(1000)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@unique([trainingId, employeeId])
+  @@index([trainingId])
+  @@index([employeeId])
+}
+
+model TrainingCertificate {
+  id                    String          @id @default(cuid())
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  title                 String          @db.VarChar(255)
+  certificateNumber     String          @unique @db.VarChar(255)
+  issuedDate            DateTime
+  expiryDate            DateTime?
+  certificateUrl        String          @db.VarChar(1000)
+  createdAt             DateTime        @default(now())
+
+  @@index([employeeId])
+}
+
+model Quiz {
+  id                    String          @id @default(cuid())
+  title                 String          @db.VarChar(255)
+  description           String?         @db.Text
+  passingScore          Decimal         @default(70) @db.Decimal(5, 2)
+  createdAt             DateTime        @default(now())
+
+  // Relations
+  questions             QuizQuestion[]
+  results               QuizResult[]
+}
+
+model QuizQuestion {
+  id                    String          @id @default(cuid())
+  quizId                String
+  quiz                  Quiz            @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  question              String          @db.Text
+  options               String          @db.Text // JSON array
+  correctAnswer         String          @db.VarChar(500)
+  order                 Int
+  createdAt             DateTime        @default(now())
+
+  @@index([quizId])
+}
+
+model QuizResult {
+  id                    String          @id @default(cuid())
+  quizId                String
+  quiz                  Quiz            @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  employeeId            String
+  score                 Decimal         @db.Decimal(5, 2)
+  passed                Boolean
+  answers               String          @db.Text // JSON
+  createdAt             DateTime        @default(now())
+
+  @@index([quizId])
+  @@index([employeeId])
+}
+
+// ============================================================================
+// ANALYTICS & REPORTING
+// ============================================================================
+
+model ServiceMetric {
+  id                    String          @id @default(cuid())
+  serviceType           ServiceType
+  date                  DateTime
+  totalBookings         Int
+  completedBookings     Int
+  cancelledBookings     Int
+  totalRevenue          Decimal         @db.Decimal(12, 2)
+  averageRating         Decimal?        @db.Decimal(5, 2)
+  areaCode              String?         @db.VarChar(50)
+  createdAt             DateTime        @default(now())
+
+  @@unique([serviceType, date, areaCode])
+}
+
+model PerformanceMetric {
+  id                    String          @id @default(cuid())
+  employeeId            String
+  date                  DateTime
+  shiftsCompleted       Int
+  hoursWorked           Decimal         @db.Decimal(8, 2)
+  averageRating         Decimal?        @db.Decimal(5, 2)
+  attendanceRate        Decimal         @db.Decimal(5, 2)
+  createdAt             DateTime        @default(now())
+
+  @@unique([employeeId, date])
+}
+
+model FinancialMetric {
+  id                    String          @id @default(cuid())
+  date                  DateTime
+  totalRevenue          Decimal         @db.Decimal(12, 2)
+  totalExpenses         Decimal         @db.Decimal(12, 2)
+  totalPayroll          Decimal         @db.Decimal(12, 2)
+  netProfit             Decimal         @db.Decimal(12, 2)
+  monthlyRecurringRevenue Decimal       @db.Decimal(12, 2)
+  createdAt             DateTime        @default(now())
+
+  @@unique([date])
+}
+
+model PerformanceReview {
+  id                    String          @id @default(cuid())
+  employeeId            String
+  employee              Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewDate            DateTime
+  rating                Decimal         @db.Decimal(5, 2)
+  feedback              String          @db.Text
+  reviewedBy            String          @db.VarChar(255)
+  createdAt             DateTime        @default(now())
+
+  @@index([employeeId])
+}
+
+// ============================================================================
+// CUSTOMER SUPPORT
+// ============================================================================
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+  ESCALATED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model SupportTicket {
+  id                    String          @id @default(cuid())
+  ticketNumber          String          @unique @db.VarChar(50)
+  userId                String
+  user                  User            @relation(fields: [userId], references: [id])
+  subject               String          @db.VarChar(500)
+  description           String          @db.Text
+  category              String          @db.VarChar(100)
+  status                TicketStatus    @default(OPEN)
+  priority              TicketPriority  @default(MEDIUM)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  // Relations
+  messages              SupportMessage[]
+}
+
+model SupportMessage {
+  id                    String          @id @default(cuid())
+  ticketId              String
+  ticket                SupportTicket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender                String          @db.VarChar(100)
+  message               String          @db.Text
+  attachmentUrl         String?         @db.VarChar(1000)
+  createdAt             DateTime        @default(now())
+
+  @@index([ticketId])
+}
+
+model FAQ {
+  id                    String          @id @default(cuid())
+  question              String          @db.Text
+  answer                String          @db.Text
+  category              String          @db.VarChar(100)
+  views                 Int             @default(0)
+  helpful               Int             @default(0)
+  notHelpful            Int             @default(0)
+  isPublished           Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+}
+
+model Feedback {
+  id                    String          @id @default(cuid())
+  email                 String          @db.VarChar(255)
+  subject               String          @db.VarChar(500)
+  message               String          @db.Text
+  rating                Int?            // 1-5
+  isResolved            Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+}
+
+// ============================================================================
+// ACCOUNTING & FINANCE
+// ============================================================================
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum ExpenseCategory {
+  SUPPLIES
+  TRANSPORTATION
+  PAYROLL
+  UTILITIES
+  MAINTENANCE
+  OTHER
+}
+
+model Invoice {
+  id                    String          @id @default(cuid())
+  invoiceNumber         String          @unique @db.VarChar(50)
+  bookingId             String?         @unique
+  booking               Booking?        @relation(fields: [bookingId], references: [id])
+  customerName          String          @db.VarChar(255)
+  customerEmail         String          @db.VarChar(255)
+  amount                Decimal         @db.Decimal(10, 2)
+  tax                   Decimal         @default(0) @db.Decimal(10, 2)
+  totalAmount           Decimal         @db.Decimal(10, 2)
+  status                InvoiceStatus   @default(DRAFT)
+  issueDate             DateTime
+  dueDate               DateTime
+  paidDate              DateTime?
+  notes                 String?         @db.Text
+  currency              String          @default("NGN") @db.VarChar(3)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  @@index([bookingId])
+}
+
+model Expense {
+  id                    String          @id @default(cuid())
+  category              ExpenseCategory
+  amount                Decimal         @db.Decimal(10, 2)
+  currency              String          @default("NGN") @db.VarChar(3)
+  description           String          @db.Text
+  receiptUrl            String?         @db.VarChar(1000)
+  date                  DateTime
+  approvedBy            String?         @db.VarChar(255)
+  isApproved            Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+}
+
+model Payment {
+  id                    String          @id @default(cuid())
+  bookingId             String
+  booking               Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount                Decimal         @db.Decimal(10, 2)
+  currency              String          @default("NGN") @db.VarChar(3)
+  paymentMethod         String          @db.VarChar(50) // CARD, TRANSFER, CASH, PAYSTACK, STRIPE
+  transactionId         String?         @unique @db.VarChar(255)
+  status                String          @default("PENDING") @db.VarChar(50) // PENDING, COMPLETED, FAILED
+  paidAt                DateTime?
+  createdAt             DateTime        @default(now())
+
+  @@index([bookingId])
+}
+
+model FinancialReport {
+  id                    String          @id @default(cuid())
+  reportType            String          @db.VarChar(50) // MONTHLY, QUARTERLY, ANNUAL
+  period                String          @db.VarChar(50) // e.g., "2024-01"
+  totalRevenue          Decimal         @db.Decimal(12, 2)
+  totalExpenses         Decimal         @db.Decimal(12, 2)
+  totalPayroll          Decimal         @db.Decimal(12, 2)
+  netProfit             Decimal         @db.Decimal(12, 2)
+  profitMargin          Decimal         @db.Decimal(5, 2)
+  createdAt             DateTime        @default(now())
+
+  @@unique([reportType, period])
+}
+
+// ============================================================================
+// NOTIFICATIONS & AUDIT
+// ============================================================================
+
+model Notification {
+  id                    String          @id @default(cuid())
+  userId                String
+  user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                 String          @db.VarChar(255)
+  message               String          @db.Text
+  type                  String          @db.VarChar(50) // EMAIL, SMS, PUSH, IN_APP
+  channel               String          @db.VarChar(50) // BOOKING, SHIFT, PAYMENT, etc.
+  isRead                Boolean         @default(false)
+  readAt                DateTime?
+  createdAt             DateTime        @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id                    String          @id @default(cuid())
+  action                String          @db.VarChar(255)
+  entity                String          @db.VarChar(100)
+  entityId              String          @db.VarChar(255)
+  performedBy           String          @db.VarChar(255)
+  changes               String?         @db.Text // JSON of what changed
+  ipAddress             String?         @db.VarChar(50)
+  userAgent             String?         @db.Text
+  createdAt             DateTime        @default(now())
+
+  @@index([entity])
+  @@index([performedBy])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// ADMIN & SETTINGS
+// ============================================================================
+
+model AdminSetting {
+  id                    String          @id @default(cuid())
+  key                   String          @unique @db.VarChar(255)
+  value                 String          @db.Text
+  description           String?         @db.Text
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+}
+
+model ServiceCategory {
+  id                    String          @id @default(cuid())
+  name                  String          @unique @db.VarChar(255)
+  description           String?         @db.Text
+  icon                  String?         @db.VarChar(255)
+  displayOrder          Int             @default(0)
+  isActive              Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+}
+
+model Location {
+  id                    String          @id @default(cuid())
+  code                  String          @unique @db.VarChar(50)
+  name                  String          @unique @db.VarChar(100)
+  description           String?         @db.Text
+  latitude              Decimal?        @db.Decimal(10, 8)
+  longitude             Decimal?        @db.Decimal(11, 8)
+  isAvailable           Boolean         @default(true)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+}
