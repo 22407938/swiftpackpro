@@ -1,6 +1,7 @@
 {
-  "buildCommand": "npm run prisma:generate && next build",
-  "devCommand": "next dev",
-  "installCommand": "npm install",
+  "version": 2,
+  "buildCommand": "npm run build --prefix Projects/swiftpack-pro",
+  "devCommand": "npm run dev --prefix Projects/swiftpack-pro",
+  "installCommand": "npm install --prefix Projects/swiftpack-pro",
   "framework": "nextjs"
 }
